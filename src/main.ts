@@ -7,7 +7,6 @@ async function bootstrap() {
 
   // --- ALLOW FRONTEND CONNECTIONS (CORS) ---
   app.enableCors(); 
-  // This opens the door for your React app to fetch data.
 
   const config = new DocumentBuilder()
     .setTitle('Vignex API')
@@ -17,6 +16,7 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);
 
-  await app.listen(3000);
+  // FIX: Use the System Port OR 3000
+  await app.listen(process.env.PORT || 3000); 
 }
 bootstrap();
