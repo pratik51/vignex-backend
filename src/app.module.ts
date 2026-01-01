@@ -14,7 +14,7 @@ import { ConfigModule } from '@nestjs/config'; // Make sure this is installed, i
       type: 'postgres',
       // FIX: Check for Environment Variables first!
       host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT) || 5432,
+      port: parseInt(process.env.DB_PORT || '5432'),
       username: process.env.DB_USERNAME || 'postgres',
       password: process.env.DB_PASSWORD || 'VigNex2025',
       database: process.env.DB_NAME || 'vignex',
