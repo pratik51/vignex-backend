@@ -7,6 +7,7 @@ import { UsersModule } from './users/users.module';
 import { TradesModule } from './trades/trades.module';
 import { User } from './users/entities/user.entity';
 import { Trade } from './trades/entities/trade.entity';
+import { AdsModule } from './ads/ads.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { Trade } from './trades/entities/trade.entity';
     }),
     UsersModule,
     TradesModule,
+    AdsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
