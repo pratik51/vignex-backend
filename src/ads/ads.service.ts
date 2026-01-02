@@ -14,7 +14,8 @@ export class AdsService {
 
   // 1. POST A NEW AD
   async create(createAdDto: CreateAdDto) {
-    const { sellerId, price, amount, paymentMethod } = createAdDto;
+    // Destructure the new limit fields from the DTO
+    const { sellerId, price, amount, paymentMethod, minLimit, maxLimit } = createAdDto;
 
     // Check if seller exists
     const seller = await this.usersRepository.findOneBy({ id: sellerId });
@@ -31,6 +32,8 @@ export class AdsService {
       initialAmount: amount,
       currentAmount: amount,
       paymentMethod,
+      minLimit: minLimit || 0, // Save the minimum INR limit
+      maxLimit: maxLimit || 0, // Save the maximum INR limit
       status: 'OPEN'
     });
 
