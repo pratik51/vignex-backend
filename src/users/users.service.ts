@@ -50,4 +50,14 @@ export class UsersService {
     // Force saving it as a clean number
     return await this.usersRepository.save(user);
   }
+  async login(email: string, pass: string) {
+    // 1. Find user by email
+    const user = await this.usersRepository.findOneBy({ email });
+    
+    // 2. Check password (Simple check for now)
+    if (user && user.password === pass) {
+      return user;
+    }
+    return null;
+  }
 }
