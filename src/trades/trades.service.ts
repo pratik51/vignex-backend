@@ -1,98 +1,114 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
-import { CreateTradeDto } from './dto/create-trade.dto';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Trade } from './entities/trade.entity';
+import { Trade, TradeStatus } from './entities/trade.entity';
 import { User } from '../users/entities/user.entity';
+import { Ad } from '../ads/entities/ad.entity';
+import { CreateTradeDto } from './dto/create-trade.dto';
 
 @Injectable()
 export class TradesService {
   constructor(
-    @InjectRepository(Trade)
-    private tradesRepository: Repository<Trade>,
-    @InjectRepository(User)
-    private usersRepository: Repository<User>,
+    @InjectRepository(Trade) private tradesRepository: Repository<Trade>,
+    @InjectRepository(User) private usersRepository: Repository<User>,
+    @InjectRepository(Ad) private adsRepository: Repository<Ad>,
   ) {}
 
+  // 1. CREATE TRADE
   async create(createTradeDto: CreateTradeDto) {
-    const { sellerId, buyerId, amount } = createTradeDto;
+    const { adId, buyerId, amount } = createTradeDto;
 
-    console.log(`[VIGNEX SECURITY] Attempting trade for ${amount} USDT...`);
-
-    // 1. Find the Seller
-    const seller = await this.usersRepository.findOneBy({ id: sellerId });
-    if (!seller) throw new BadRequestException('Seller not found');
-
-    // 2. CHECK BALANCE (Paranoid Mode)
-    let currentBalance = Number(seller.usdtBalance);
-    if (isNaN(currentBalance)) {
-        currentBalance = 0;
-    }
+    const ad = await this.adsRepository.findOne({ where: { id: adId }, relations: ['seller'] });
+    if (!ad) throw new BadRequestException('Ad not found');
+    if (ad.status !== 'OPEN') throw new BadRequestException('Ad is closed');
     
-    console.log(`[VIGNEX SECURITY] Seller Clean Balance is: ${currentBalance}`);
+    // Check Limits
+    const totalCostINR = amount * ad.price;
+    if (ad.minLimit && totalCostINR < ad.minLimit) throw new BadRequestException(`Min order: ₹${ad.minLimit}`);
+    if (ad.maxLimit && totalCostINR > ad.maxLimit) throw new BadRequestException(`Max order: ₹${ad.maxLimit}`);
 
-    if (currentBalance < amount) {
-      console.log(`[VIGNEX SECURITY] BLOCKED: Insufficient Funds`);
-      throw new BadRequestException(`Insufficient Balance! You only have ${currentBalance} USDT.`);
+    const seller = ad.seller;
+    if (!seller) throw new BadRequestException('Seller user invalid'); // Check 1
+
+    if (Number(seller.usdtBalance) < amount) {
+      throw new BadRequestException('Seller insufficient funds');
     }
 
-    // 3. LOCK FUNDS
-    seller.usdtBalance = currentBalance - amount;
+    // Lock Funds
+    seller.usdtBalance = Number(seller.usdtBalance) - amount;
     await this.usersRepository.save(seller);
 
-    // 4. Create Trade
+    // Reduce Ad Inventory
+    ad.currentAmount = Number(ad.currentAmount) - amount;
+    if (ad.currentAmount <= 0) ad.status = 'CLOSED';
+    await this.adsRepository.save(ad);
+
     const newTrade = this.tradesRepository.create({
-      amount: amount,
-      status: 'PENDING',
-      seller: { id: sellerId },
-      buyer: { id: buyerId },
+      amount,
+      price: ad.price,
+      status: TradeStatus.PENDING_PAYMENT,
+      seller: seller,
+      buyer: { id: buyerId } as User, // Cast to help TS
+      ad: ad
     });
 
-    console.log(`[VIGNEX SECURITY] SUCCESS: Funds Locked.`);
     return await this.tradesRepository.save(newTrade);
   }
 
-  findAll() {
-    return this.tradesRepository.find({ relations: ['seller', 'buyer'] });
-  }
+  // 2. CONFIRM PAYMENT (Buyer)
+  async confirmPayment(tradeId: number, buyerId: number) {
+    const trade = await this.tradesRepository.findOne({ where: { id: tradeId }, relations: ['buyer'] });
+    if (!trade) throw new NotFoundException('Trade not found');
+    if (!trade.buyer) throw new BadRequestException('Trade has no buyer linked'); // Check 2
 
-  findOne(id: number) {
-    return this.tradesRepository.findOne({ where: { id }, relations: ['seller', 'buyer'] });
-  }
+    if (trade.buyer.id !== buyerId) throw new BadRequestException('Not authorized');
+    if (trade.status !== TradeStatus.PENDING_PAYMENT) throw new BadRequestException('Wrong status');
 
-  // --- RELEASE FUNDS (Fixed) ---
-  async releaseTrade(tradeId: number) {
-    // 1. Find the Trade
-    const trade = await this.tradesRepository.findOne({ 
-      where: { id: tradeId },
-      relations: ['buyer', 'seller'] 
-    });
-
-    if (!trade) throw new BadRequestException('Trade not found');
-    if (trade.status === 'COMPLETED') throw new BadRequestException('Trade already completed');
-
-    console.log(`[VIGNEX RELEASE] Releasing Trade #${tradeId} of ${trade.amount} USDT...`);
-
-    // 2. GIVE MONEY TO BUYER
-    // Check if buyer exists before doing math!
-    const buyer = await this.usersRepository.findOneBy({ id: trade.buyer.id });
-    
-    if (!buyer) {
-        throw new BadRequestException('CRITICAL ERROR: Buyer account missing!');
-    }
-    
-    // Safety check for NaN
-    let currentBalance = Number(buyer.usdtBalance);
-    if (isNaN(currentBalance)) currentBalance = 0;
-
-    buyer.usdtBalance = currentBalance + Number(trade.amount);
-    await this.usersRepository.save(buyer); // Now TypeScript knows 'buyer' is definitely not null
-
-    // 3. UPDATE TRADE STATUS
-    trade.status = 'COMPLETED';
+    trade.status = TradeStatus.PAID;
     return await this.tradesRepository.save(trade);
   }
 
-  update(id: number, updateTradeDto: any) { return `This action updates a #${id} trade`; }
-  remove(id: number) { return `This action removes a #${id} trade`; }
+  // 3. RELEASE FUNDS (Seller)
+  async releaseTrade(tradeId: number, sellerId: number) {
+    const trade = await this.tradesRepository.findOne({ where: { id: tradeId }, relations: ['buyer', 'seller'] });
+    if (!trade) throw new NotFoundException('Trade not found');
+    if (!trade.seller) throw new BadRequestException('Trade has no seller');
+    if (!trade.buyer) throw new BadRequestException('Trade has no buyer'); // Check 3
+
+    if (trade.seller.id !== sellerId) throw new BadRequestException('Not authorized');
+    if (trade.status === TradeStatus.COMPLETED) throw new BadRequestException('Already completed');
+
+    // Transfer to Buyer
+    // Re-fetch buyer to ensure we have latest balance
+    const buyer = await this.usersRepository.findOneBy({ id: trade.buyer.id });
+    if (!buyer) throw new BadRequestException('Buyer user not found'); // Check 4
+
+    buyer.usdtBalance = Number(buyer.usdtBalance) + Number(trade.amount);
+    await this.usersRepository.save(buyer);
+
+    trade.status = TradeStatus.COMPLETED;
+    return await this.tradesRepository.save(trade);
+  }
+
+  // 4. CANCEL
+  async cancelTrade(tradeId: number, userId: number) {
+    const trade = await this.tradesRepository.findOne({ where: { id: tradeId }, relations: ['seller'] });
+    if (!trade) throw new NotFoundException('Trade not found');
+    if (!trade.seller) throw new BadRequestException('Trade has no seller'); // Check 5
+
+    if (trade.status === TradeStatus.COMPLETED) throw new BadRequestException('Cannot cancel completed trade');
+
+    // Refund Seller
+    const seller = await this.usersRepository.findOneBy({ id: trade.seller.id });
+    if (!seller) throw new BadRequestException('Seller user not found'); // Check 6
+
+    seller.usdtBalance = Number(seller.usdtBalance) + Number(trade.amount);
+    await this.usersRepository.save(seller);
+
+    trade.status = TradeStatus.CANCELLED;
+    return await this.tradesRepository.save(trade);
+  }
+
+  findAll() { return this.tradesRepository.find({ relations: ['seller', 'buyer', 'ad'] }); }
+  findOne(id: number) { return this.tradesRepository.findOne({ where: { id }, relations: ['seller', 'buyer', 'ad'] }); }
 }

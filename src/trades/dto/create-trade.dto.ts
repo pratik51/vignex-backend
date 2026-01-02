@@ -1,5 +1,5 @@
 export class CreateTradeDto {
-  amount: number;
-  sellerId: number;
+  adId: number;   // <--- This was missing
   buyerId: number;
+  amount: number;
 }
