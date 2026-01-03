@@ -1,33 +1,33 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ConfigModule } from '@nestjs/config'; // <--- Now this will work
+import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UsersModule } from './users/users.module';
 import { TradesModule } from './trades/trades.module';
+import { AdsModule } from './ads/ads.module';
 import { User } from './users/entities/user.entity';
 import { Trade } from './trades/entities/trade.entity';
-import { AdsModule } from './ads/ads.module';
+import { Ad } from './ads/entities/ad.entity'; // <--- Import this!
 
 @Module({
   imports: [
-    // 1. Initialize the Config Module so we can read .env files
-    ConfigModule.forRoot({
-      isGlobal: true, // Makes it available everywhere
-    }),
+    ConfigModule.forRoot({ isGlobal: true }),
 
-    // 2. Connect to Database (Render or Local)
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DB_HOST || 'localhost',
-      // FIX: Handle "undefined" port safely
-      port: parseInt(process.env.DB_PORT || '5432'), 
+      port: parseInt(process.env.DB_PORT || '5432'),
       username: process.env.DB_USERNAME || 'postgres',
       password: process.env.DB_PASSWORD || 'VigNex2025',
       database: process.env.DB_NAME || 'vignex',
-      entities: [User, Trade],
-      synchronize: true, // auto-create tables (turn off in production later)
-      ssl: process.env.DB_HOST ? { rejectUnauthorized: false } : false, // Required for Render
+      
+      // FIX 1: Add Ad to the list OR use autoLoadEntities
+      entities: [User, Trade, Ad], 
+      autoLoadEntities: true, // <--- Best Practice: Loads entities from imported modules automatically
+
+      synchronize: true,
+      ssl: process.env.DB_HOST ? { rejectUnauthorized: false } : false,
     }),
     UsersModule,
     TradesModule,
