@@ -9,28 +9,34 @@ export class User {
   email: string;
 
   @Column()
-  password: string; // We will encrypt this later!
+  password: string;
 
   @Column({ default: false })
-  isKycVerified: boolean; // This is your Compliance Check
+  isKycVerified: boolean;
 
   @Column({ default: false })
-  isFrozen: boolean; // The "Zero-Freeze" kill switch
+  isFrozen: boolean;
 
-  // Balances (Simulating a Multi-Currency Wallet)
   @Column({ type: 'decimal', precision: 18, scale: 8, default: 0 })
   usdtBalance: number;
 
   @Column({ nullable: true })
-  depositAddress: string; // The unique crypto address we give them
+  depositAddress: string;
 
-  // --- NEW COLUMNS FOR MERCHANT TIERS ---
+  // --- REPUTATION STATS ---
+  @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
+  completionRate: number; 
+
+  // CHANGED: Store Seconds instead of Minutes
+  @Column({ type: 'decimal', precision: 10, scale: 0, default: 0 })
+  avgReleaseTimeSeconds: number; 
+  // ------------------------
+
   @Column({ default: 0 })
   totalTrades: number;
 
   @Column({ default: 'Bronze' })
-  tier: string; // Bronze, Silver, Gold
-  // -------------------------------------
+  tier: string;
 
   @CreateDateColumn()
   createdAt: Date;

@@ -17,18 +17,17 @@ export class TradesService {
   // 1. CREATE TRADE
   async create(createTradeDto: CreateTradeDto) {
     const { adId, buyerId, amount } = createTradeDto;
-
     const ad = await this.adsRepository.findOne({ where: { id: adId }, relations: ['seller'] });
     if (!ad) throw new BadRequestException('Ad not found');
     if (ad.status !== 'OPEN') throw new BadRequestException('Ad is closed');
     
     // Check Limits
     const totalCostINR = amount * ad.price;
-    if (ad.minLimit && totalCostINR < ad.minLimit) throw new BadRequestException(`Min order: ₹${ad.minLimit}`);
-    if (ad.maxLimit && totalCostINR > ad.maxLimit) throw new BadRequestException(`Max order: ₹${ad.maxLimit}`);
+    if (ad.minLimit && totalCostINR < Number(ad.minLimit)) throw new BadRequestException(`Min order: ₹${ad.minLimit}`);
+    if (ad.maxLimit && totalCostINR > Number(ad.maxLimit)) throw new BadRequestException(`Max order: ₹${ad.maxLimit}`);
 
     const seller = ad.seller;
-    if (!seller) throw new BadRequestException('Seller user invalid'); // Check 1
+    if (!seller) throw new BadRequestException('Seller user invalid');
 
     if (Number(seller.usdtBalance) < amount) {
       throw new BadRequestException('Seller insufficient funds');
@@ -48,7 +47,7 @@ export class TradesService {
       price: ad.price,
       status: TradeStatus.PENDING_PAYMENT,
       seller: seller,
-      buyer: { id: buyerId } as User, // Cast to help TS
+      buyer: { id: buyerId } as User,
       ad: ad
     });
 
@@ -59,54 +58,117 @@ export class TradesService {
   async confirmPayment(tradeId: number, buyerId: number) {
     const trade = await this.tradesRepository.findOne({ where: { id: tradeId }, relations: ['buyer'] });
     if (!trade) throw new NotFoundException('Trade not found');
-    if (!trade.buyer) throw new BadRequestException('Trade has no buyer linked'); // Check 2
+    if (!trade.buyer) throw new BadRequestException('Trade has no buyer linked');
 
     if (trade.buyer.id !== buyerId) throw new BadRequestException('Not authorized');
     if (trade.status !== TradeStatus.PENDING_PAYMENT) throw new BadRequestException('Wrong status');
 
     trade.status = TradeStatus.PAID;
+    
+    // CAPTURE TIME
+    trade.paymentConfirmedAt = new Date(); 
+
     return await this.tradesRepository.save(trade);
   }
 
-  // 3. RELEASE FUNDS (Seller)
+  // 3. RELEASE FUNDS (Seller) - FIXED NULL CHECK
   async releaseTrade(tradeId: number, sellerId: number) {
     const trade = await this.tradesRepository.findOne({ where: { id: tradeId }, relations: ['buyer', 'seller'] });
     if (!trade) throw new NotFoundException('Trade not found');
     if (!trade.seller) throw new BadRequestException('Trade has no seller');
-    if (!trade.buyer) throw new BadRequestException('Trade has no buyer'); // Check 3
+    if (!trade.buyer) throw new BadRequestException('Trade has no buyer');
 
     if (trade.seller.id !== sellerId) throw new BadRequestException('Not authorized');
     if (trade.status === TradeStatus.COMPLETED) throw new BadRequestException('Already completed');
 
     // Transfer to Buyer
-    // Re-fetch buyer to ensure we have latest balance
     const buyer = await this.usersRepository.findOneBy({ id: trade.buyer.id });
-    if (!buyer) throw new BadRequestException('Buyer user not found'); // Check 4
+    
+    // --- FIX: Guard Clause ---
+    if (!buyer) throw new NotFoundException('Buyer user not found'); 
 
     buyer.usdtBalance = Number(buyer.usdtBalance) + Number(trade.amount);
     await this.usersRepository.save(buyer);
 
     trade.status = TradeStatus.COMPLETED;
-    return await this.tradesRepository.save(trade);
+    trade.completedAt = new Date(); 
+    await this.tradesRepository.save(trade);
+
+    // Update Stats
+    await this.updateUserStats(sellerId);
+
+    return trade;
   }
 
-  // 4. CANCEL
+  // 4. CANCEL - FIXED NULL CHECK
   async cancelTrade(tradeId: number, userId: number) {
     const trade = await this.tradesRepository.findOne({ where: { id: tradeId }, relations: ['seller'] });
     if (!trade) throw new NotFoundException('Trade not found');
-    if (!trade.seller) throw new BadRequestException('Trade has no seller'); // Check 5
+    if (!trade.seller) throw new BadRequestException('Trade has no seller');
 
     if (trade.status === TradeStatus.COMPLETED) throw new BadRequestException('Cannot cancel completed trade');
 
     // Refund Seller
     const seller = await this.usersRepository.findOneBy({ id: trade.seller.id });
-    if (!seller) throw new BadRequestException('Seller user not found'); // Check 6
+    
+    // --- FIX: Guard Clause ---
+    if (!seller) throw new NotFoundException('Seller user not found');
 
     seller.usdtBalance = Number(seller.usdtBalance) + Number(trade.amount);
     await this.usersRepository.save(seller);
 
     trade.status = TradeStatus.CANCELLED;
-    return await this.tradesRepository.save(trade);
+    await this.tradesRepository.save(trade);
+
+    // Update Stats
+    await this.updateUserStats(trade.seller.id);
+
+    return trade;
+  }
+
+  // --- ALGORITHM: CALCULATE STATS (SECONDS) ---
+  private async updateUserStats(userId: number) {
+    const trades = await this.tradesRepository.find({
+      where: [{ seller: { id: userId } }],
+      order: { createdAt: 'DESC' },
+      take: 50
+    });
+
+    if (trades.length === 0) return;
+
+    // A. Completion Rate
+    const completedCount = trades.filter(t => t.status === TradeStatus.COMPLETED).length;
+    const completionRate = (completedCount / trades.length) * 100;
+
+    // B. Average Release Time (SECONDS)
+    const validTrades = trades.filter(t => 
+      t.status === TradeStatus.COMPLETED && 
+      t.paymentConfirmedAt && 
+      t.completedAt
+    );
+
+    let totalSeconds = 0;
+    validTrades.forEach(t => {
+      // Ensure timestamps exist
+      if (t.completedAt && t.paymentConfirmedAt) {
+        const diffMs = t.completedAt.getTime() - t.paymentConfirmedAt.getTime();
+        const seconds = diffMs / 1000; // Convert ms to seconds
+        totalSeconds += seconds;
+      }
+    });
+
+    const avgSeconds = validTrades.length > 0 ? (totalSeconds / validTrades.length) : 0;
+
+    // Update User Entity
+    const user = await this.usersRepository.findOneBy({ id: userId });
+    
+    // --- FIX: Guard Clause ---
+    if (user) {
+      user.completionRate = completionRate;
+      user.avgReleaseTimeSeconds = avgSeconds; // Saving Seconds
+      user.totalTrades = trades.length; 
+      await this.usersRepository.save(user);
+    }
   }
 
   findAll() { return this.tradesRepository.find({ relations: ['seller', 'buyer', 'ad'] }); }
