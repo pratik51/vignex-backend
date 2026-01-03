@@ -24,6 +24,14 @@ export class User {
   @Column({ nullable: true })
   depositAddress: string; // The unique crypto address we give them
 
+  // --- NEW COLUMNS FOR MERCHANT TIERS ---
+  @Column({ default: 0 })
+  totalTrades: number;
+
+  @Column({ default: 'Bronze' })
+  tier: string; // Bronze, Silver, Gold
+  // -------------------------------------
+
   @CreateDateColumn()
   createdAt: Date;
 
