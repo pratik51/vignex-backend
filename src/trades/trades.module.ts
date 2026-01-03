@@ -4,10 +4,10 @@ import { TradesService } from './trades.service';
 import { TradesController } from './trades.controller';
 import { Trade } from './entities/trade.entity';
 import { User } from '../users/entities/user.entity';
-import { Ad } from '../ads/entities/ad.entity'; // <--- 1. Import Ad Entity
+import { Ad } from '../ads/entities/ad.entity'; // <--- 1. Import Ad
 
 @Module({
-  // 2. Add 'Ad' to the list below so the Repository becomes available
+  // 2. Add Ad to the list below
   imports: [TypeOrmModule.forFeature([Trade, User, Ad])], 
   controllers: [TradesController],
   providers: [TradesService],
