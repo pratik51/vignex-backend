@@ -6,9 +6,11 @@ import { AppService } from './app.service';
 import { UsersModule } from './users/users.module';
 import { TradesModule } from './trades/trades.module';
 import { AdsModule } from './ads/ads.module';
+import { ChatModule } from './chat/chat.module'; // <--- 1. Import Module
 import { User } from './users/entities/user.entity';
 import { Trade } from './trades/entities/trade.entity';
-import { Ad } from './ads/entities/ad.entity'; // <--- Import this!
+import { Ad } from './ads/entities/ad.entity';
+import { Message } from './chat/entities/message.entity'; // <--- 2. Import Entity
 
 @Module({
   imports: [
@@ -22,9 +24,9 @@ import { Ad } from './ads/entities/ad.entity'; // <--- Import this!
       password: process.env.DB_PASSWORD || 'VigNex2025',
       database: process.env.DB_NAME || 'vignex',
       
-      // FIX 1: Add Ad to the list OR use autoLoadEntities
-      entities: [User, Trade, Ad], 
-      autoLoadEntities: true, // <--- Best Practice: Loads entities from imported modules automatically
+      // 3. Register the Message entity here
+      entities: [User, Trade, Ad, Message], 
+      autoLoadEntities: true, 
 
       synchronize: true,
       ssl: process.env.DB_HOST ? { rejectUnauthorized: false } : false,
@@ -32,6 +34,7 @@ import { Ad } from './ads/entities/ad.entity'; // <--- Import this!
     UsersModule,
     TradesModule,
     AdsModule,
+    ChatModule, // <--- 4. Register the Module here
   ],
   controllers: [AppController],
   providers: [AppService],
