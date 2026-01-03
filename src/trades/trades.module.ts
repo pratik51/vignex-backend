@@ -3,10 +3,12 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { TradesService } from './trades.service';
 import { TradesController } from './trades.controller';
 import { Trade } from './entities/trade.entity';
-import { User } from '../users/entities/user.entity'; // <--- Import User
+import { User } from '../users/entities/user.entity';
+import { Ad } from '../ads/entities/ad.entity'; // <--- 1. Import Ad Entity
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Trade, User])], // <--- Allow access to both tables
+  // 2. Add 'Ad' to the list below so the Repository becomes available
+  imports: [TypeOrmModule.forFeature([Trade, User, Ad])], 
   controllers: [TradesController],
   providers: [TradesService],
 })
