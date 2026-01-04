@@ -15,26 +15,31 @@ import { Message } from './chat/entities/message.entity';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      // 1. If Render provides a simplified URL, use it directly:
-      url: process.env.DATABASE_URL, 
-      
-      // 2. Otherwise fall back to individual vars (for local dev):
-      host: process.env.DB_HOST,
-      port: 5432,
-      password: process.env.DB_PASSWORD,
-      username: process.env.DB_USER,
-      database: process.env.DB_NAME,
-      
-      entities: [User, Ad, Trade, Message],
-      synchronize: true,
-      
-      // 3. SSL is required for Render Production
-      ssl: process.env.DB_HOST === 'localhost' ? false : { rejectUnauthorized: false },
-      
-      // 4. Extra safety to prevent empty connection errors
-      autoLoadEntities: true,
+    TypeOrmModule.forRootAsync({
+      useFactory: () => {
+        // --- DEBUG LOGGING (Check your Render Logs) ---
+        console.log('Connecting to DB...');
+        console.log('DB_HOST:', process.env.DB_HOST);
+        console.log('DB_USER:', process.env.DB_USER || process.env.DB_USERNAME); // Log which one exists
+        
+        return {
+          type: 'postgres',
+          // 1. Priority: Use the Full Render URL if available
+          url: process.env.DATABASE_URL,
+          
+          // 2. Fallback: Build connection manually
+          host: process.env.DB_HOST,
+          port: 5432,
+          // FIX: Look for DB_USER, if missing, look for DB_USERNAME
+          username: process.env.DB_USER || process.env.DB_USERNAME, 
+          password: process.env.DB_PASSWORD,
+          database: process.env.DB_NAME,
+          
+          entities: [User, Ad, Trade, Message],
+          synchronize: true,
+          ssl: process.env.DB_HOST === 'localhost' ? false : { rejectUnauthorized: false },
+        };
+      },
     }),
     UsersModule,
     AdsModule,
