@@ -5,6 +5,7 @@ import { Trade, TradeStatus } from './entities/trade.entity';
 import { User } from '../users/entities/user.entity';
 import { Ad } from '../ads/entities/ad.entity';
 import { CreateTradeDto } from './dto/create-trade.dto';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class TradesService {
@@ -17,178 +18,188 @@ export class TradesService {
   // 1. CREATE TRADE
   async create(createTradeDto: CreateTradeDto) {
     const { adId, buyerId, amount } = createTradeDto;
+    
     const ad = await this.adsRepository.findOne({ where: { id: adId }, relations: ['seller'] });
     if (!ad) throw new BadRequestException('Ad not found');
-    if (ad.status !== 'OPEN') throw new BadRequestException('Ad is closed');
-    
-    // Check Limits
-    const totalCostINR = amount * ad.price;
-    if (ad.minLimit && totalCostINR < Number(ad.minLimit)) throw new BadRequestException(`Min order: ₹${ad.minLimit}`);
-    if (ad.maxLimit && totalCostINR > Number(ad.maxLimit)) throw new BadRequestException(`Max order: ₹${ad.maxLimit}`);
 
-    const seller = ad.seller;
-    if (!seller) throw new BadRequestException('Seller user invalid');
+    const taker = await this.usersRepository.findOneBy({ id: buyerId });
+    if (!taker) throw new BadRequestException('User not found');
 
-    if (Number(seller.usdtBalance) < amount) {
-      throw new BadRequestException('Seller insufficient funds');
+    // Logic: Determine who is Buyer vs Seller
+    let tradeBuyer: User;
+    let tradeSeller: User;
+
+    if (ad.type === 'SELL') {
+      tradeSeller = ad.seller;
+      tradeBuyer = taker;
+    } else {
+      tradeBuyer = ad.seller;
+      tradeSeller = taker;
     }
 
-    // Lock Funds
-    seller.usdtBalance = Number(seller.usdtBalance) - amount;
-    await this.usersRepository.save(seller);
+    if (!tradeSeller || !tradeBuyer) throw new BadRequestException('Invalid buyer/seller');
 
-    // Reduce Ad Inventory
-    ad.currentAmount = Number(ad.currentAmount) - amount;
-    if (ad.currentAmount <= 0) ad.status = 'CLOSED';
-    await this.adsRepository.save(ad);
+    const verifyDeadline = new Date();
+    verifyDeadline.setMinutes(verifyDeadline.getMinutes() + (ad.verificationTimeLimit || 10));
 
-    const newTrade = this.tradesRepository.create({
+    const trade = this.tradesRepository.create({
       amount,
       price: ad.price,
-      status: TradeStatus.PENDING_PAYMENT,
-      seller: seller,
-      buyer: { id: buyerId } as User,
+      status: TradeStatus.WAITING_VERIFICATION,
+      verificationExpiresAt: verifyDeadline,
+      seller: tradeSeller,
+      buyer: tradeBuyer,
       ad: ad
     });
 
-    return await this.tradesRepository.save(newTrade);
-  }
-
-  // 2. CONFIRM PAYMENT (Buyer)
-  async confirmPayment(tradeId: number, buyerId: number) {
-    const trade = await this.tradesRepository.findOne({ where: { id: tradeId }, relations: ['buyer'] });
-    if (!trade) throw new NotFoundException('Trade not found');
-    if (!trade.buyer) throw new BadRequestException('Trade has no buyer linked');
-
-    if (trade.buyer.id !== buyerId) throw new BadRequestException('Not authorized');
-    if (trade.status !== TradeStatus.PENDING_PAYMENT) throw new BadRequestException('Wrong status');
-
-    trade.status = TradeStatus.PAID;
+    if (Number(tradeSeller.usdtBalance) < amount) {
+        throw new BadRequestException('Seller has insufficient balance');
+    }
     
-    // CAPTURE TIME
-    trade.paymentConfirmedAt = new Date(); 
+    tradeSeller.usdtBalance = Number(tradeSeller.usdtBalance) - amount;
+    await this.usersRepository.save(tradeSeller);
 
     return await this.tradesRepository.save(trade);
   }
 
-  // 3. RELEASE FUNDS (Seller) - FIXED NULL CHECK
-  async releaseTrade(tradeId: number, sellerId: number) {
-    const trade = await this.tradesRepository.findOne({ where: { id: tradeId }, relations: ['buyer', 'seller'] });
+  // 2. VERIFY ORDER
+  async verifyOrder(tradeId: number, userId: number) {
+    const trade = await this.tradesRepository.findOne({ where: { id: tradeId }, relations: ['ad', 'seller', 'buyer'] });
     if (!trade) throw new NotFoundException('Trade not found');
-    if (!trade.seller) throw new BadRequestException('Trade has no seller');
-    if (!trade.buyer) throw new BadRequestException('Trade has no buyer');
 
-    if (trade.seller.id !== sellerId) throw new BadRequestException('Not authorized');
-    if (trade.status === TradeStatus.COMPLETED) throw new BadRequestException('Already completed');
+    // Strict checks for relations
+    if (!trade.ad || !trade.seller || !trade.buyer) throw new BadRequestException('Trade data incomplete');
 
-    // Transfer to Buyer
-    const buyer = await this.usersRepository.findOneBy({ id: trade.buyer.id });
+    const isAdPoster = (trade.ad.type === 'SELL' && trade.seller.id === userId) || 
+                       (trade.ad.type === 'BUY' && trade.buyer.id === userId);
     
-    // --- FIX: Guard Clause ---
-    if (!buyer) throw new NotFoundException('Buyer user not found'); 
+    if (!isAdPoster) throw new BadRequestException('Only the Ad Poster can verify');
 
-    buyer.usdtBalance = Number(buyer.usdtBalance) + Number(trade.amount);
-    await this.usersRepository.save(buyer);
+    const payDeadline = new Date();
+    payDeadline.setMinutes(payDeadline.getMinutes() + (trade.ad.paymentTimeLimit || 15));
 
-    trade.status = TradeStatus.COMPLETED;
-    trade.completedAt = new Date(); 
-    await this.tradesRepository.save(trade);
+    trade.status = TradeStatus.PENDING_PAYMENT;
+    trade.verifiedAt = new Date();
+    trade.paymentExpiresAt = payDeadline;
 
-    // Update Stats
-    await this.updateUserStats(sellerId);
-
-    return trade;
+    return await this.tradesRepository.save(trade);
   }
 
-  // 4. CANCEL - FIXED NULL CHECK
-  async cancelTrade(tradeId: number, userId: number) {
-    const trade = await this.tradesRepository.findOne({ where: { id: tradeId }, relations: ['seller'] });
+  // 3. EXTEND TIME
+  async extendTime(tradeId: number, userId: number, minutes: number) {
+    const trade = await this.tradesRepository.findOne({ where: { id: tradeId }, relations: ['ad', 'seller', 'buyer'] });
     if (!trade) throw new NotFoundException('Trade not found');
-    if (!trade.seller) throw new BadRequestException('Trade has no seller');
+    if (!trade.ad || !trade.seller || !trade.buyer) throw new BadRequestException('Trade data incomplete');
 
-    if (trade.status === TradeStatus.COMPLETED) throw new BadRequestException('Cannot cancel completed trade');
-
-    // Refund Seller
-    const seller = await this.usersRepository.findOneBy({ id: trade.seller.id });
+    const isAdPoster = (trade.ad.type === 'SELL' && trade.seller.id === userId) || 
+                       (trade.ad.type === 'BUY' && trade.buyer.id === userId);
     
-    // --- FIX: Guard Clause ---
-    if (!seller) throw new NotFoundException('Seller user not found');
+    if (!isAdPoster) throw new BadRequestException('Only Merchant can extend time');
 
-    seller.usdtBalance = Number(seller.usdtBalance) + Number(trade.amount);
-    await this.usersRepository.save(seller);
+    // Handle potential null date
+    const currentExpiry = trade.paymentExpiresAt ? new Date(trade.paymentExpiresAt) : new Date();
+    currentExpiry.setMinutes(currentExpiry.getMinutes() + minutes);
+    trade.paymentExpiresAt = currentExpiry;
+
+    return await this.tradesRepository.save(trade);
+  }
+
+  // 4. CONFIRM PAYMENT
+  async confirmPayment(tradeId: number, userId: number) {
+    const trade = await this.tradesRepository.findOne({ where: { id: tradeId } });
+    if (!trade) throw new NotFoundException('Trade not found');
+
+    if (trade.status === TradeStatus.WAITING_VERIFICATION) throw new BadRequestException('Merchant must verify order first');
+    
+    trade.status = TradeStatus.PAID;
+    trade.paymentConfirmedAt = new Date();
+    return await this.tradesRepository.save(trade);
+  }
+
+  // 5. RELEASE TRADE
+  async releaseTrade(tradeId: number, userId: number) {
+     const trade = await this.tradesRepository.findOne({ where: { id: tradeId }, relations: ['seller', 'buyer'] });
+     if (!trade) throw new NotFoundException('Trade not found');
+     if (!trade.seller || !trade.buyer) throw new BadRequestException('Trade participants missing');
+
+     if (trade.seller.id !== userId) throw new BadRequestException('Only seller can release');
+     
+     const buyer = await this.usersRepository.findOneBy({ id: trade.buyer.id });
+     if (!buyer) throw new NotFoundException('Buyer not found');
+
+     buyer.usdtBalance = Number(buyer.usdtBalance) + Number(trade.amount);
+     await this.usersRepository.save(buyer);
+
+     trade.status = TradeStatus.COMPLETED;
+     trade.completedAt = new Date();
+     return await this.tradesRepository.save(trade);
+  }
+
+  // 6. CANCEL TRADE
+  async cancelTrade(tradeId: number, userId: number) {
+    const trade = await this.tradesRepository.findOne({ where: { id: tradeId }, relations: ['seller', 'buyer', 'ad'] });
+    if (!trade) throw new NotFoundException('Trade not found');
+    if (!trade.ad || !trade.seller || !trade.buyer) throw new BadRequestException('Trade data incomplete');
+
+    const isAdPoster = (trade.ad.type === 'SELL' && trade.seller.id === userId) || 
+                       (trade.ad.type === 'BUY' && trade.buyer.id === userId);
+
+    if (isAdPoster) throw new BadRequestException('Ad Poster cannot cancel. Only the customer can.');
 
     trade.status = TradeStatus.CANCELLED;
-    await this.tradesRepository.save(trade);
-
-    // Update Stats
-    await this.updateUserStats(trade.seller.id);
-
-    return trade;
-  }
-
-  // 5. APPEAL (Dispute)
-  async appealTrade(tradeId: number, userId: number) {
-    const trade = await this.tradesRepository.findOne({ where: { id: tradeId }, relations: ['seller', 'buyer'] });
-    if (!trade) throw new NotFoundException('Trade not found');
-
-    if (trade.status !== TradeStatus.PAID) {
-      throw new BadRequestException('Can only appeal after payment is marked');
+    
+    // Refund Seller
+    const seller = await this.usersRepository.findOneBy({ id: trade.seller.id });
+    if (seller) {
+        seller.usdtBalance = Number(seller.usdtBalance) + Number(trade.amount);
+        await this.usersRepository.save(seller);
     }
 
-    // Allow either Buyer or Seller to appeal
-    if (trade.buyer.id !== userId && trade.seller.id !== userId) {
-      throw new BadRequestException('Not authorized to appeal this trade');
-    }
-
-    trade.status = TradeStatus.IN_APPEAL;
     return await this.tradesRepository.save(trade);
   }
 
-  // --- ALGORITHM: CALCULATE STATS (SECONDS) ---
-  private async updateUserStats(userId: number) {
-    const trades = await this.tradesRepository.find({
-      where: [{ seller: { id: userId } }],
-      order: { createdAt: 'DESC' },
-      take: 50
-    });
+  // 7. APPEAL
+  async appealTrade(tradeId: number, userId: number) {
+     const trade = await this.tradesRepository.findOne({ where: { id: tradeId } });
+     if (!trade) throw new NotFoundException('Trade not found');
 
-    if (trades.length === 0) return;
-
-    // A. Completion Rate
-    const completedCount = trades.filter(t => t.status === TradeStatus.COMPLETED).length;
-    const completionRate = (completedCount / trades.length) * 100;
-
-    // B. Average Release Time (SECONDS)
-    const validTrades = trades.filter(t => 
-      t.status === TradeStatus.COMPLETED && 
-      t.paymentConfirmedAt && 
-      t.completedAt
-    );
-
-    let totalSeconds = 0;
-    validTrades.forEach(t => {
-      // Ensure timestamps exist
-      if (t.completedAt && t.paymentConfirmedAt) {
-        const diffMs = t.completedAt.getTime() - t.paymentConfirmedAt.getTime();
-        const seconds = diffMs / 1000; // Convert ms to seconds
-        totalSeconds += seconds;
-      }
-    });
-
-    const avgSeconds = validTrades.length > 0 ? (totalSeconds / validTrades.length) : 0;
-
-    // Update User Entity
-    const user = await this.usersRepository.findOneBy({ id: userId });
-    
-    // --- FIX: Guard Clause ---
-    if (user) {
-      user.completionRate = completionRate;
-      user.avgReleaseTimeSeconds = avgSeconds; // Saving Seconds
-      user.totalTrades = trades.length; 
-      await this.usersRepository.save(user);
-    }
+     trade.status = TradeStatus.IN_APPEAL;
+     return await this.tradesRepository.save(trade);
   }
 
-  findAll() { return this.tradesRepository.find({ relations: ['seller', 'buyer', 'ad'] }); }
-  findOne(id: number) { return this.tradesRepository.findOne({ where: { id }, relations: ['seller', 'buyer', 'ad'] }); }
+  // CRON JOB
+  @Cron(CronExpression.EVERY_MINUTE)
+  async handleCron() {
+    const now = new Date();
+    const expiredVerif = await this.tradesRepository.createQueryBuilder('trade')
+      .where('trade.status = :s', { s: TradeStatus.WAITING_VERIFICATION })
+      .andWhere('trade.verificationExpiresAt < :now', { now })
+      .leftJoinAndSelect('trade.seller', 'seller')
+      .getMany();
+
+    for (const t of expiredVerif) {
+      if (!t.seller) continue; // Skip if corrupt data
+
+      t.status = TradeStatus.CANCELLED;
+      const seller = await this.usersRepository.findOneBy({ id: t.seller.id });
+      if (seller) {
+        seller.usdtBalance = Number(seller.usdtBalance) + Number(t.amount);
+        await this.usersRepository.save(seller);
+      }
+      await this.tradesRepository.save(t);
+      console.log(`Auto-cancelled Trade #${t.id}`);
+    }
+  }
+  
+  findAll() {
+    return this.tradesRepository.find({ relations: ['buyer', 'seller', 'ad'] });
+  }
+
+  async findMerchantTrades(userId: number) {
+     return this.tradesRepository.find({
+        where: { ad: { seller: { id: userId } } },
+        relations: ['buyer', 'seller', 'ad'],
+        order: { createdAt: 'DESC' }
+     });
+  }
 }

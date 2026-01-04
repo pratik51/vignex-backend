@@ -1,4 +1,6 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Ad } from '../../ads/entities/ad.entity';
+import { Trade } from '../../trades/entities/trade.entity';
 
 @Entity()
 export class User {
@@ -11,32 +13,33 @@ export class User {
   @Column()
   password: string;
 
-  @Column({ default: false })
-  isKycVerified: boolean;
-
-  @Column({ default: false })
-  isFrozen: boolean;
-
+  // Wallet Balance (USDT)
   @Column({ type: 'decimal', precision: 18, scale: 8, default: 0 })
   usdtBalance: number;
 
-  @Column({ nullable: true })
-  depositAddress: string;
+  // Merchant Stats
+  @Column({ default: 'Bronze' })
+  tier: string; 
 
-  // --- REPUTATION STATS ---
   @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
-  completionRate: number; 
-
-  // CHANGED: Store Seconds instead of Minutes
-  @Column({ type: 'decimal', precision: 10, scale: 0, default: 0 })
-  avgReleaseTimeSeconds: number; 
-  // ------------------------
+  completionRate: number;
 
   @Column({ default: 0 })
-  totalTrades: number;
+  avgReleaseTimeSeconds: number;
 
-  @Column({ default: 'Bronze' })
-  tier: string;
+  @Column({ default: false })
+  isKycVerified: boolean;
+
+  // --- NEW: Admin Flag ---
+  @Column({ default: false })
+  isAdmin: boolean;
+
+  // Relations
+  @OneToMany(() => Ad, (ad) => ad.seller)
+  ads: Ad[];
+
+  @OneToMany(() => Trade, (trade) => trade.buyer)
+  trades: Trade[]; // Trades where I am the buyer (or taker)
 
   @CreateDateColumn()
   createdAt: Date;

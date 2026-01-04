@@ -1,40 +1,40 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UsersModule } from './users/users.module';
-import { TradesModule } from './trades/trades.module';
 import { AdsModule } from './ads/ads.module';
-import { ChatModule } from './chat/chat.module'; // <--- 1. Import Module
+import { TradesModule } from './trades/trades.module';
+import { ChatModule } from './chat/chat.module';
 import { User } from './users/entities/user.entity';
-import { Trade } from './trades/entities/trade.entity';
 import { Ad } from './ads/entities/ad.entity';
-import { Message } from './chat/entities/message.entity'; // <--- 2. Import Entity
+import { Trade } from './trades/entities/trade.entity';
+import { Message } from './chat/entities/message.entity';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
-
+    // --- ENABLE CRON JOBS ---
+    ScheduleModule.forRoot(),
+    
     TypeOrmModule.forRoot({
       type: 'postgres',
-      host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT || '5432'),
-      username: process.env.DB_USERNAME || 'postgres',
-      password: process.env.DB_PASSWORD || 'VigNex2025',
-      database: process.env.DB_NAME || 'vignex',
-      
-      // 3. Register the Message entity here
-      entities: [User, Trade, Ad, Message], 
-      autoLoadEntities: true, 
-
+      host: process.env.DB_HOST,
+      port: 5432,
+      password: process.env.DB_PASSWORD,
+      username: process.env.DB_USER,
+      database: process.env.DB_NAME,
+      entities: [User, Ad, Trade, Message],
       synchronize: true,
-      ssl: process.env.DB_HOST ? { rejectUnauthorized: false } : false,
+      ssl: true, 
+      extra: {
+        ssl: { rejectUnauthorized: false },
+      },
     }),
     UsersModule,
-    TradesModule,
     AdsModule,
-    ChatModule, // <--- 4. Register the Module here
+    TradesModule,
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [AppService],

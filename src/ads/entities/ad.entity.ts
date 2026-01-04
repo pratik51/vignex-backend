@@ -9,7 +9,6 @@ export class Ad {
   @ManyToOne(() => User, (user) => user.id)
   seller: User;
 
-  // --- STEP 1: TYPE & PRICE ---
   @Column({ default: 'SELL' })
   type: 'BUY' | 'SELL';
 
@@ -22,7 +21,6 @@ export class Ad {
   @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
   floatingMargin: number; 
 
-  // --- STEP 2: AMOUNT & LIMITS ---
   @Column({ type: 'decimal', precision: 18, scale: 8 })
   initialAmount: number;
 
@@ -35,14 +33,17 @@ export class Ad {
   @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
   maxLimit: number; 
 
-  // --- FIX IS HERE: Added { default: 'UPI' } ---
   @Column({ default: 'UPI' }) 
   paymentMethod: string; 
 
+  // --- NEW: Time for Merchant to Verify Order (in minutes) ---
+  @Column({ default: 10 })
+  verificationTimeLimit: number; 
+
+  // --- NEW: Time for User to Pay (after verification) ---
   @Column({ default: 15 })
   paymentTimeLimit: number; 
 
-  // --- STEP 3: REMARKS & AUTOMATION ---
   @Column({ type: 'text', nullable: true })
   remarks: string;
 

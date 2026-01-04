@@ -3,7 +3,7 @@ import { User } from '../../users/entities/user.entity';
 import { Ad } from '../../ads/entities/ad.entity';
 
 export enum TradeStatus {
-  CREATED = 'CREATED',
+  WAITING_VERIFICATION = 'WAITING_VERIFICATION',
   PENDING_PAYMENT = 'PENDING_PAYMENT',
   PAID = 'PAID',
   COMPLETED = 'COMPLETED',
@@ -16,39 +16,46 @@ export class Trade {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ type: 'decimal', precision: 18, scale: 8 })
+  @Column({ type: 'decimal', precision: 18, scale: 2 })
   amount: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  @Column({ type: 'decimal', precision: 18, scale: 2 })
   price: number;
 
-  @Column({
-    type: 'simple-enum',
-    enum: TradeStatus,
-    default: TradeStatus.PENDING_PAYMENT
-  })
-  status: TradeStatus;
+  @Column({ default: TradeStatus.WAITING_VERIFICATION })
+  status: string;
 
-  // --- NEW TIMESTAMPS ---
+  // --- NEW TIMERS ---
   @Column({ nullable: true })
-  paymentConfirmedAt: Date; // Time Buyer clicked "Paid"
+  verificationExpiresAt: Date; // Auto-cancel if merchant sleeps
 
   @Column({ nullable: true })
-  completedAt: Date; // Time Seller clicked "Release"
-  // ----------------------
+  paymentExpiresAt: Date; // Auto-cancel if buyer sleeps
 
-  @ManyToOne(() => User, (user) => user.id)
-  seller: User;
-
-  @ManyToOne(() => User, (user) => user.id)
+  @ManyToOne(() => User, (user) => user.trades)
   buyer: User;
 
-  @ManyToOne(() => Ad, (ad) => ad.id)
+  @ManyToOne(() => User, (user) => user.trades)
+  seller: User;
+
+  @ManyToOne(() => Ad)
   ad: Ad;
+
+  @Column({ nullable: true })
+  paymentMethod: string;
 
   @CreateDateColumn()
   createdAt: Date;
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @Column({ nullable: true })
+  verifiedAt: Date;
+
+  @Column({ nullable: true })
+  paymentConfirmedAt: Date;
+
+  @Column({ nullable: true })
+  completedAt: Date;
 }

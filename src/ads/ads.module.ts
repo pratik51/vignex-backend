@@ -1,14 +1,13 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { AdsService } from './ads.service';
 import { AdsController } from './ads.controller';
-import { TypeOrmModule } from '@nestjs/typeorm';
 import { Ad } from './entities/ad.entity';
-import { User } from '../users/entities/user.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Ad, User])], // <--- IMPORT ENTITIES
+  imports: [TypeOrmModule.forFeature([Ad])],
   controllers: [AdsController],
   providers: [AdsService],
-  exports: [AdsService] // Export so Trades can use it later
+  exports: [AdsService], // <--- Ensure this is exported
 })
-export class AdsModule {}
+export class AdsModule {} // <--- Ensure 'export' is here

@@ -1,5 +1,4 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn } from 'typeorm';
-import { Trade } from '../../trades/entities/trade.entity';
 import { User } from '../../users/entities/user.entity';
 
 @Entity()
@@ -8,14 +7,19 @@ export class Message {
   id: number;
 
   @Column()
-  text: string;
+  content: string;
 
-  // Link message to a specific Trade (Order ID)
-  @ManyToOne(() => Trade, (trade) => trade.id)
-  trade: Trade;
+  // --- NEW: Image Support ---
+  @Column({ default: 'TEXT' })
+  type: 'TEXT' | 'IMAGE';
 
-  // Link message to the User who sent it
-  @ManyToOne(() => User, (user) => user.id)
+  @Column({ type: 'text', nullable: true }) // Using 'text' type to allow long Base64 strings
+  imageUrl: string; 
+
+  @Column()
+  tradeId: number;
+
+  @ManyToOne(() => User)
   sender: User;
 
   @CreateDateColumn()
