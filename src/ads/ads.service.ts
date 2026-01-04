@@ -14,38 +14,54 @@ export class AdsService {
 
   // 1. POST A NEW AD
   async create(createAdDto: CreateAdDto) {
-    // Destructure the new limit fields from the DTO
-    const { sellerId, price, amount, paymentMethod, minLimit, maxLimit } = createAdDto;
+    const { 
+      sellerId, price, amount, paymentMethod, minLimit, maxLimit,
+      type, priceType, floatingMargin, paymentTimeLimit, remarks, autoReply
+    } = createAdDto;
 
-    // Check if seller exists
     const seller = await this.usersRepository.findOneBy({ id: sellerId });
     if (!seller) throw new BadRequestException('Seller not found');
 
-    // Check Balance (Don't let them post ads if they are broke)
-    if (Number(seller.usdtBalance) < amount) {
+    // FLOATING PRICE LOGIC
+    // In a real app, you would fetch the live price from an API (e.g., Binance API)
+    let finalPrice = price;
+    if (priceType === 'FLOATING' && floatingMargin) {
+       const marketPrice = 88.00; // Mock Market Price for now
+       finalPrice = marketPrice * (floatingMargin / 100);
+    }
+
+    // CHECK BALANCE (Only if Selling)
+    // If Buying, they pay Fiat, so we don't check their Crypto balance
+    if (type === 'SELL' && Number(seller.usdtBalance) < amount) {
         throw new BadRequestException('Insufficient Balance to post this ad');
     }
 
     const ad = this.adsRepository.create({
       seller,
-      price,
+      type,
+      priceType,
+      price: finalPrice,
+      floatingMargin,
       initialAmount: amount,
       currentAmount: amount,
       paymentMethod,
-      minLimit: minLimit || 0, // Save the minimum INR limit
-      maxLimit: maxLimit || 0, // Save the maximum INR limit
+      minLimit: minLimit || 0,
+      maxLimit: maxLimit || 0,
+      paymentTimeLimit: paymentTimeLimit || 15,
+      remarks,
+      autoReply,
       status: 'OPEN'
     });
 
     return await this.adsRepository.save(ad);
   }
 
-  // 2. SHOW ALL OPEN ADS (The Order Book)
+  // 2. SHOW ALL OPEN ADS
   findAll() {
     return this.adsRepository.find({
       where: { status: 'OPEN' },
       relations: ['seller'],
-      order: { price: 'ASC' } // Cheapest first (like Binance)
+      order: { price: 'ASC' }
     });
   }
 

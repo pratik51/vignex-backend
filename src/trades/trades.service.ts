@@ -126,6 +126,24 @@ export class TradesService {
     return trade;
   }
 
+  // 5. APPEAL (Dispute)
+  async appealTrade(tradeId: number, userId: number) {
+    const trade = await this.tradesRepository.findOne({ where: { id: tradeId }, relations: ['seller', 'buyer'] });
+    if (!trade) throw new NotFoundException('Trade not found');
+
+    if (trade.status !== TradeStatus.PAID) {
+      throw new BadRequestException('Can only appeal after payment is marked');
+    }
+
+    // Allow either Buyer or Seller to appeal
+    if (trade.buyer.id !== userId && trade.seller.id !== userId) {
+      throw new BadRequestException('Not authorized to appeal this trade');
+    }
+
+    trade.status = TradeStatus.IN_APPEAL;
+    return await this.tradesRepository.save(trade);
+  }
+
   // --- ALGORITHM: CALCULATE STATS (SECONDS) ---
   private async updateUserStats(userId: number) {
     const trades = await this.tradesRepository.find({

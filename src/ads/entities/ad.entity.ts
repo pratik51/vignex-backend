@@ -1,14 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
-
-// 1. DEFINE THE DROPDOWN OPTIONS
-export enum PaymentMethod {
-  IMPS = 'IMPS',
-  UPI = 'UPI',
-  NEFT = 'NEFT',
-  RTGS = 'RTGS',
-  DIGITAL_RUPEE = 'Digital Rupee'
-}
 
 @Entity()
 export class Ad {
@@ -18,32 +9,54 @@ export class Ad {
   @ManyToOne(() => User, (user) => user.id)
   seller: User;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
-  price: number; 
+  // --- STEP 1: TYPE & PRICE ---
+  @Column({ default: 'SELL' })
+  type: 'BUY' | 'SELL';
+
+  @Column({ default: 'FIXED' })
+  priceType: 'FIXED' | 'FLOATING';
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  price: number; // Final price
+
+  @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
+  floatingMargin: number; // e.g. 105%
+
+  // --- STEP 2: AMOUNT & LIMITS ---
+  @Column({ type: 'decimal', precision: 18, scale: 8 })
+  initialAmount: number;
 
   @Column({ type: 'decimal', precision: 18, scale: 8 })
-  initialAmount: number; 
+  currentAmount: number;
 
-  @Column({ type: 'decimal', precision: 18, scale: 8 })
-  currentAmount: number; 
+  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
+  minLimit: number;
 
-  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
-  minLimit: number; 
+  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
+  maxLimit: number;
 
-  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
-  maxLimit: number; 
+  @Column()
+  paymentMethod: string; // e.g. "UPI,IMPS" (Comma separated)
 
-  // 2. USE THE ENUM HERE
-  @Column({
-    type: 'simple-enum',
-    enum: PaymentMethod,
-    default: PaymentMethod.UPI // Default option
-  })
-  paymentMethod: PaymentMethod;
+  @Column({ default: 15 })
+  paymentTimeLimit: number; // 15, 30, 45 mins
+
+  // --- STEP 3: REMARKS & AUTOMATION ---
+  @Column({ type: 'text', nullable: true })
+  remarks: string;
+
+  @Column({ type: 'text', nullable: true })
+  autoReply: string;
+
+  @Column({ nullable: true })
+  minRegisterDays: number;
 
   @Column({ default: 'OPEN' })
   status: string;
 
   @CreateDateColumn()
   createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
 }

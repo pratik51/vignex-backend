@@ -1,10 +1,14 @@
-import { PaymentMethod } from '../entities/ad.entity'; // Import the Enum
-
 export class CreateAdDto {
   sellerId: number;
+  type: 'BUY' | 'SELL';
+  priceType: 'FIXED' | 'FLOATING';
   price: number;
+  floatingMargin?: number;
   amount: number;
   minLimit: number;
   maxLimit: number;
-  paymentMethod: PaymentMethod; // <--- Enforces the Dropdown
+  paymentMethod: string; // Now accepts "UPI,IMPS" string
+  paymentTimeLimit: number;
+  remarks?: string;
+  autoReply?: string;
 }
