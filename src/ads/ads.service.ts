@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { CreateAdDto } from './dto/create-ad.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -23,15 +23,13 @@ export class AdsService {
     if (!seller) throw new BadRequestException('Seller not found');
 
     // FLOATING PRICE LOGIC
-    // In a real app, you would fetch the live price from an API (e.g., Binance API)
     let finalPrice = price;
     if (priceType === 'FLOATING' && floatingMargin) {
-       const marketPrice = 88.00; // Mock Market Price for now
+       const marketPrice = 88.00; // Mock Market Price
        finalPrice = marketPrice * (floatingMargin / 100);
     }
 
-    // CHECK BALANCE (Only if Selling)
-    // If Buying, they pay Fiat, so we don't check their Crypto balance
+    // BALANCE CHECK
     if (type === 'SELL' && Number(seller.usdtBalance) < amount) {
         throw new BadRequestException('Insufficient Balance to post this ad');
     }
@@ -56,7 +54,7 @@ export class AdsService {
     return await this.adsRepository.save(ad);
   }
 
-  // 2. SHOW ALL OPEN ADS
+  // 2. SHOW ALL OPEN ADS (Public Market)
   findAll() {
     return this.adsRepository.find({
       where: { status: 'OPEN' },
@@ -67,5 +65,39 @@ export class AdsService {
 
   findOne(id: number) {
     return this.adsRepository.findOne({ where: { id }, relations: ['seller'] });
+  }
+
+  // --- NEW DASHBOARD METHODS ---
+
+  // 3. GET MY ADS
+  async findMyAds(sellerId: number) {
+    return this.adsRepository.find({
+      where: { seller: { id: sellerId } },
+      order: { createdAt: 'DESC' }
+    });
+  }
+
+  // 4. TOGGLE STATUS (Pause/Resume)
+  async toggleStatus(id: number, userId: number) {
+    const ad = await this.adsRepository.findOne({ where: { id }, relations: ['seller'] });
+    if (!ad) throw new NotFoundException('Ad not found');
+    if (ad.seller.id !== userId) throw new BadRequestException('Not authorized');
+
+    // Switch between OPEN and OFFLINE
+    if (ad.status === 'OPEN') {
+      ad.status = 'OFFLINE';
+    } else {
+      ad.status = 'OPEN';
+    }
+    return await this.adsRepository.save(ad);
+  }
+
+  // 5. DELETE AD
+  async remove(id: number, userId: number) {
+    const ad = await this.adsRepository.findOne({ where: { id }, relations: ['seller'] });
+    if (!ad) throw new NotFoundException('Ad not found');
+    if (ad.seller.id !== userId) throw new BadRequestException('Not authorized');
+
+    return await this.adsRepository.remove(ad);
   }
 }
