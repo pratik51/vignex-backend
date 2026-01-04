@@ -17,29 +17,30 @@ export class Ad {
   priceType: 'FIXED' | 'FLOATING';
 
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
-  price: number; // Final price
+  price: number; 
 
   @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
-  floatingMargin: number; // e.g. 105%
+  floatingMargin: number; 
 
   // --- STEP 2: AMOUNT & LIMITS ---
   @Column({ type: 'decimal', precision: 18, scale: 8 })
   initialAmount: number;
 
   @Column({ type: 'decimal', precision: 18, scale: 8 })
-  currentAmount: number;
+  currentAmount: number; 
 
   @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
-  minLimit: number;
+  minLimit: number; 
 
   @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
-  maxLimit: number;
+  maxLimit: number; 
 
-  @Column()
-  paymentMethod: string; // e.g. "UPI,IMPS" (Comma separated)
+  // --- FIX IS HERE: Added { default: 'UPI' } ---
+  @Column({ default: 'UPI' }) 
+  paymentMethod: string; 
 
   @Column({ default: 15 })
-  paymentTimeLimit: number; // 15, 30, 45 mins
+  paymentTimeLimit: number; 
 
   // --- STEP 3: REMARKS & AUTOMATION ---
   @Column({ type: 'text', nullable: true })
