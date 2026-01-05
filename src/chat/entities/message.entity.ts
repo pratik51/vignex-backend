@@ -6,14 +6,16 @@ export class Message {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
+  // --- FIX: Add { nullable: true } ---
+  // This prevents the startup crash if old messages have no content
+  // and allows for "Image-only" messages in the future.
+  @Column({ nullable: true }) 
   content: string;
 
-  // --- NEW: Image Support ---
   @Column({ default: 'TEXT' })
   type: 'TEXT' | 'IMAGE';
 
-  @Column({ type: 'text', nullable: true }) // Using 'text' type to allow long Base64 strings
+  @Column({ type: 'text', nullable: true }) 
   imageUrl: string; 
 
   @Column()
